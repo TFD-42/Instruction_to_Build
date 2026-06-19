@@ -1,5 +1,9 @@
 # Instruction to Build – Code Extractor
 
+
+# STILL ON BUILD
+
+
 A deterministic Python script that extracts code blocks from an instruction file, infers file names and directory paths from embedded comments, and writes the files into a structured project folder. Ollama can be used as a fallback for filename suggestions when no comment‑based hint is found.
 
 ---
