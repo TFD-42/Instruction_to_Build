@@ -1,199 +1,271 @@
-# Instruction to Build – Code Extractor
+# Advanced Project Builder – Enhanced Edition
 
-
-# STILL ON BUILD
-
-
-A deterministic Python script that extracts code blocks from an instruction file, infers file names and directory paths from embedded comments, and writes the files into a structured project folder. Ollama can be used as a fallback for filename suggestions when no comment‑based hint is found.
+A powerful, extensible tool that extracts code blocks from Markdown/instruction files, reconstructs a complete project directory, analyzes dependencies, and optionally enhances the plan with LLM-generated metadata and missing files.
 
 ---
 
-## Features
+## 🚀 Features
 
-- **Extracts all fenced code blocks** (```` ```lang … ``` ````) from a text file.
-- **Automatically detects filenames and directories** from the first few lines of each block – supports common comment styles (`#`, `//`, `--`, `/* … */`).
-- **Falls back to language‑based naming** if no comment is present (e.g., `file_py_1.py`).
-- **Optional Ollama integration** to generate intelligent filenames when no comment hint exists.
-- **Preserves code exactly** – never modifies the extracted content.
-- **Builds a complete project tree** with folders and files, plus a `plan.json` summary.
-- **Dry‑run mode** to preview what would be written.
+- **Block Extraction** – Parses Markdown files for fenced code blocks with language hints and optional explicit paths.
+- **Path Detection** – Automatically detects file paths from comments (e.g., `# path/to/file.py`).
+- **Dependency Analysis** – Extracts imports/requires for multiple languages (Python, JavaScript, Go, Rust, Java, C/C++) and builds a dependency graph.
+- **Intelligent Resolution** – Resolves relative and absolute imports to file paths using a pluggable resolver system.
+- **Parallel Processing** – Speeds up extraction and analysis using thread pools.
+- **LLM Integration** – (Optional) Uses Ollama to:
+  - Detect project type and frameworks.
+  - Identify entrypoints.
+  - Suggest missing files (e.g., `requirements.txt`, `README.md`).
+  - Generate content for missing files.
+- **Rich Reporting**:
+  - Mermaid dependency graph (`.mmd`)
+  - Tree view of project structure (`tree.txt`)
+  - HTML report with statistics and file listing
+  - SBOM (Software Bill of Materials) in SPDX-like JSON format
+- **Security** – Prevents path traversal attacks and validates output paths.
+- **Caching & Retries** – Resolver caching and exponential backoff for LLM calls.
+- **Dry‑Run** – Preview changes without writing to disk.
 
 ---
 
-## Requirements
+## 📦 Installation
 
-- Python 3.6 or later
-- Optional: [Ollama](https://ollama.com/) (with a model like `qwen2.5:7b`) for AI‑based filename suggestions.
+### Prerequisites
+- Python 3.9 or higher
+- (Optional) [Ollama](https://ollama.ai/) with a model like `qwen2.5:7b` or `llama3`
 
-No external Python packages are required unless you enable Ollama – then you need the `ollama` Python library:
+### Steps
+
+1. Clone the repository or save the script as `project_builder.py`.
+2. Install required dependencies:
+   ```bash
+   pip install networkx ollama tomli  # tomli for Python < 3.11
+   ```
+3. (Optional) Install `tomli` if you are on Python < 3.11; otherwise, the standard `tomllib` is used.
+
+---
+
+## 🖥️ Usage
 
 ```bash
-pip install ollama
+python project_builder.py --path <instruction.md> [OPTIONS]
 ```
 
----
+### Command‑Line Options
 
-## Installation
+| Option | Description |
+|--------|-------------|
+| `--path` | **Required.** Path to the instruction file (Markdown). |
+| `--output-dir` | Output directory (default: `./extracted_project`). |
+| `--ollama` | Enable LLM planning using Ollama. |
+| `--ollama-model` | Ollama model name (default: `qwen2.5:7b`). |
+| `--generate-missing` | Generate content for missing files (requires `--ollama`). |
+| `--dry-run` | Preview actions without writing anything. |
+| `--verbose` | Enable debug logging. |
+| `--parallel` / `--no-parallel` | Enable/disable parallel processing (default: on). |
+| `--export-mermaid` | Export dependency graph as `graph.mmd`. |
+| `--export-tree` | Export directory tree as `tree.txt`. |
+| `--html-report` | Generate an HTML report (default: on). |
 
-Clone the repository or download `Instruction_To_Build.py` to your local machine.
+### Quick Example
 
 ```bash
-git clone https://github.com/yourusername/instruction-to-build.git
-cd instruction-to-build
+python project_builder.py --path instructions.md --ollama --generate-missing
 ```
 
-Make the script executable (Unix/Linux/macOS):
-
-```bash
-chmod +x Instruction_To_Build.py
-```
+This will:
+- Parse `instructions.md`
+- Extract code blocks
+- Use Ollama to refine project metadata and generate missing files
+- Write all files under `./extracted_project/`
+- Save `project_plan.json`, `graph.mmd`, `tree.txt`, `report.html`, and `sbom.json`
 
 ---
 
-## Usage
+## 📄 Input Format
 
-```bash
-python Instruction_To_Build.py --path <instruction_file> [options]
+The instruction file should be Markdown with fenced code blocks. Each block **must** have a language tag. Optionally, you can specify a file path in the info string:
+
+<pre>
+```python path/to/app.py
+import flask
+
+app = Flask(__name__)
+...
 ```
+</pre>
 
-### Required arguments
+You may also embed the path inside a comment on the first few lines:
 
-| Argument | Description |
-|----------|-------------|
-| `--path` | Path to the instruction file containing code blocks. |
-
-### Optional arguments
-
-| Argument | Description |
-|----------|-------------|
-| `--output-dir` | Root directory where extracted files will be written (default: `./extracted_project`). |
-| `--ollama` | Enable Ollama for fallback filename suggestions (requires `ollama` package installed and Ollama service running). |
-| `--ollama-model` | Ollama model to use (default: `qwen2.5:7b`). |
-| `--dry-run` | Simulate the extraction and write operations without creating any files. |
-| `--verbose` | Show detailed debug output. |
-
----
-
-## How it Works
-
-1. **Read** the instruction file and normalize line endings.
-2. **Extract** all fenced code blocks using the regex ```` ```lang … ``` ````.
-3. For each block, inspect the first 10 lines for comments that contain a filename or path (e.g., `# main.py`, `// /src/utils/helper.js`, `/* config.json */`).
-4. If a comment matches:
-   - The filename and directory (if any) are used.
-5. If no comment is found **and** `--ollama` is enabled:
-   - The script sends the code snippet to Ollama with a prompt to suggest a suitable filename.
-   - The response is sanitised and used as the filename.
-6. If still no filename is determined:
-   - A fallback name is generated: `{base_name}_{lang}_{index}.{ext}` (e.g., `myfile_py_1.py`).
-7. **Write** each file into the appropriate directory (creating folders as needed).
-8. Save a `plan.json` file in the output directory that records every block’s metadata and the final filename/directory chosen.
-
----
-
-## Example
-
-Suppose you have an instruction file `project_instructions.md` with the following content:
-
-````markdown
-# My Project
-
-## Backend
 ```python
-# app.py
-def main():
-    print("Hello")
+# path/to/app.py
+import flask
+...
 ```
 
-## Configuration
-```json
-// /config/settings.json
-{
-  "debug": true
+---
+
+## 🧩 Outputs
+
+| File | Description |
+|------|-------------|
+| `project_plan.json` | Metadata, file list (hashes, sizes, imports), dependency edges, circular dependencies, etc. |
+| `graph.mmd` | Mermaid diagram of the dependency graph (if `--export-mermaid`). |
+| `tree.txt` | ASCII directory tree (if `--export-tree`). |
+| `report.html` | Visual HTML summary with statistics and file table. |
+| `sbom.json` | Software Bill of Materials in SPDX-like format. |
+| All source files | Reconstructed files under the output directory. |
+
+---
+
+## 🧠 LLM Integration (Ollama)
+
+The tool can interact with a local LLM via Ollama to:
+
+- **Refine project type and frameworks** – e.g., detects FastAPI, React, Django.
+- **Identify entrypoints** – files like `main.py`, `app.js`.
+- **List missing files** – suggests files that are typical for the project type.
+- **Generate missing file content** – when `--generate-missing` is enabled.
+
+**Configuration**:
+- Set `--ollama-model` to change the model.
+- Retry logic: 3 attempts with exponential backoff.
+- Timeout: 30 seconds per call (configurable via `DEFAULT_CONFIG`).
+
+---
+
+## 🔧 Configuration
+
+Modify the `DEFAULT_CONFIG` dictionary at the top of the script to adjust:
+
+```python
+DEFAULT_CONFIG = {
+    'max_file_size_mb': 10,          # Truncate oversized files
+    'max_project_files': 5000,       # Not yet enforced (planned)
+    'parallel_workers': 4,           # Number of threads for processing
+    'llm_max_retries': 3,
+    'llm_timeout_seconds': 30,
+    'enable_mermaid': True,
+    'enable_tree': True,
+    'enable_sbom': True,
+    'enable_html_report': True,
 }
 ```
 
-## Utility
-```bash
-#!/bin/bash
-# helper.sh
-echo "Running..."
+---
+
+## 🧩 Extending Import Resolvers
+
+The `ImportResolver` class (in `ImportResolver`) supports adding custom resolvers for new languages. To add a new language, extend the `resolvers` dictionary with a callable that takes a module string and returns a resolved file path (or `None`).
+
+```python
+resolver = ImportResolver()
+resolver.resolvers['my_lang'] = lambda mod: mod.replace('.', '/') + '.myext'
+```
+
+The resolver is used during block processing to populate `ImportInfo.resolved_path`.
+
+---
+
+## 🧪 Example
+
+**Input (`instruction.md`)**:
+
+````markdown
+```python main.py
+# main.py
+import helpers
+
+def main():
+    helpers.greet()
+```
+
+```python helpers.py
+def greet():
+    print("Hello!")
 ```
 ````
 
-Running:
+**Run**:
 
 ```bash
-python Instruction_To_Build.py --path project_instructions.md --output-dir ./my_project
+python project_builder.py --path instruction.md
 ```
 
-will produce:
-
+**Output**:
 ```
-my_project/
-├── app.py
-├── config/
-│   └── settings.json
-├── helper.sh
-└── plan.json
-```
-
-The `plan.json` file contains the exact extraction plan with the original code and the chosen file paths.
-
-If you enable Ollama:
-
-```bash
-python Instruction_To_Build.py --path project_instructions.md --ollama
+extracted_project/
+├── main.py
+├── helpers.py
+├── project_plan.json
+├── graph.mmd
+├── tree.txt
+├── report.html
+└── sbom.json
 ```
 
-then blocks without a comment hint will be sent to Ollama for a filename suggestion.
+**Dependency Graph** (`graph.mmd`):
+```mermaid
+graph TD
+    main.py["main.py"] --> helpers.py["helpers.py"]
+```
 
 ---
 
-## Filename Detection Patterns
+## ⚙️ Requirements
 
-The script recognises these comment patterns in the first 10 lines of a code block:
+### Core
+- Python 3.9+
+- Standard library (argparse, asyncio, hashlib, json, logging, re, time, pathlib, collections, enum, datetime, subprocess)
 
-| Comment style | Example |
-|---------------|---------|
-| `# filename.ext` | `# main.py` |
-| `// filename.ext` | `// utils.js` |
-| `-- filename.ext` | `-- config.sql` |
-| `/* filename.ext */` | `/* data.json */` |
-| `# /path/to/file.ext` | `# /src/main.go` |
-| `// /path/to/file.ext` | `// /lib/helper.rs` |
-| `/* /path/to/file.ext */` | `/* /etc/hosts */` |
+### Optional
+- [networkx](https://networkx.org/) – for advanced graph analysis (circular dependency detection)
+- [ollama](https://github.com/ollama/ollama-python) – for LLM integration
+- [tomli](https://github.com/hukkin/tomli) – for TOML parsing (only needed on Python < 3.11)
 
-If a path is given (contains `/`), the directory part is used and the filename is extracted.
+All optional imports are gracefully handled – the tool falls back to a simplified dependency representation if `networkx` is missing.
 
 ---
 
-## Logging
+## 🛡️ Security & Safety
 
-- By default, the script logs `INFO` messages (warnings and progress).
-- Use `--verbose` to see `DEBUG` level logs, including which Ollama requests are being made.
-- `--dry-run` shows what would be written without performing any file I/O.
-
----
-
-## Error Handling
-
-- If the input file does not exist, the script exits with an error.
-- If Ollama is requested but the library is not installed, the script will log an error and exit.
-- If Ollama fails (e.g., service not running), the script falls back to the default naming and logs a warning.
+- **Path Traversal** – All file paths are validated to ensure they stay within the output root directory.
+- **Absolute Paths** – Rejected automatically.
+- **Size Limits** – Files larger than `max_file_size_mb` are truncated.
+- **Duplicate Paths** – Duplicate file paths are skipped with a warning.
+- **Dry‑Run** – Preview changes without writing any files.
 
 ---
 
-## License
+## 🐛 Troubleshooting
 
-This script is provided as open‑source under the MIT License. Feel free to use, modify, and distribute it.
+| Issue | Solution |
+|-------|----------|
+| `Ollama not available` | Install `ollama` with `pip install ollama` and ensure Ollama service is running. |
+| `ModuleNotFoundError: No module named 'networkx'` | Install networkx or ignore – the tool will still work with basic dependency tracking. |
+| LLM timeouts | Increase `llm_timeout_seconds` in `DEFAULT_CONFIG`. |
+| Missing paths in blocks | Use explicit path in the code block info string or add a `# path/to/file` comment. |
+| Circular dependencies | The tool logs them; you may need to refactor your code. |
 
 ---
 
-## Contributing
+## 🤝 Contributing
 
-Pull requests and issues are welcome. Please ensure that new features include tests and documentation.
+Contributions are welcome! Please open an issue or pull request with:
+
+- Clear description of the change
+- Tests (if applicable)
+- Adherence to the existing code style (PEP 8)
 
 ---
 
-*Happy building!* 🚀
+## 📜 License
+
+This project is released under the **MIT License**. Feel free to use, modify, and distribute.
+
+---
+
+## 🙏 Acknowledgements
+
+- Built with Python’s asyncio and threading for high performance.
+- Inspired by tools that convert LLM-generated code into runnable projects.
+- Uses Ollama for local LLM capabilities.
