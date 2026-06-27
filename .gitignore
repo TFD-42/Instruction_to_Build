@@ -1,0 +1,12 @@
+
+# Secrets / credentials
+.env
+.env.*
+*.key
+*.pem
+credentials*
+secrets*
+*_secret*
+id_rsa*
+.netrc
+
